@@ -3,7 +3,7 @@ import Google from "next-auth/providers/google";
 import { isAllowedEmail } from "@/lib/allowlist";
 
 // Google reads AUTH_GOOGLE_ID and AUTH_GOOGLE_SECRET; sessions are signed with AUTH_SECRET.
-export const { handlers, auth, signIn, signOut } = NextAuth({
+export const { handlers, auth, signOut } = NextAuth({
   providers: [Google],
   theme: { colorScheme: "dark" },
   callbacks: {

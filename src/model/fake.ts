@@ -6,12 +6,15 @@ export type FakeReply = {
   role?: ModelRole;
   /** Only match calls whose system prompt or messages contain this text or match this pattern. */
   match?: string | RegExp;
-  /** The model's output, or a function that builds it from the request. */
+  /** The model's output. */
   reply: unknown;
 };
 
+// Fixed so budget tests can count calls: every fake call costs one cent.
+const COST_PER_CALL_USD = 0.01;
+
 type FakeModel = Model & {
-  /** Every request the fake received, in order. */
+  /** Every request the fake received, in order, for tests that check what a request contained. */
   calls: ModelRequest<unknown>[];
 };
 
@@ -20,7 +23,7 @@ type FakeModel = Model & {
  * Replies go through the request's schema, so a reply the real model couldn't send fails
  * the test. A call with no matching reply throws.
  */
-export function createFakeModel(replies: FakeReply[], { costUsd = 0.01 } = {}): FakeModel {
+export function createFakeModel(replies: FakeReply[]): FakeModel {
   const calls: ModelRequest<unknown>[] = [];
 
   return {
@@ -37,10 +40,9 @@ export function createFakeModel(replies: FakeReply[], { costUsd = 0.01 } = {}): 
       if (!found) {
         throw new Error(`No fake reply for a ${request.role} call:\n${text.slice(0, 500)}`);
       }
-      const raw = typeof found.reply === "function" ? found.reply(request) : found.reply;
       return {
-        output: request.schema.parse(raw),
-        usage: { inputTokens: 0, outputTokens: 0, costUsd },
+        output: request.schema.parse(found.reply),
+        usage: { inputTokens: 0, outputTokens: 0, costUsd: COST_PER_CALL_USD },
       };
     },
   };

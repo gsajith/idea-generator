@@ -15,6 +15,13 @@
       "when": 1792822244837,
       "tag": "0001_sources_and_signals",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792823329461,
+      "tag": "0002_tick_lease",
+      "breakpoints": true
     }
   ]
 }

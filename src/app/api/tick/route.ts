@@ -4,7 +4,8 @@ import { sources } from "@/sources/registry";
 import { tick } from "@/tick/tick";
 
 // Vercel Hobby stops a function at 300 seconds. The tick stops starting new work after 240,
-// which leaves a minute for the unit of work in progress to finish.
+// which leaves a minute for the unit of work in progress to finish. TICK_LEASE_MS in
+// src/tick/tick.ts matches maxDuration; change them together.
 export const maxDuration = 300;
 const TICK_TIME_MS = 240_000;
 

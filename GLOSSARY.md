@@ -23,7 +23,7 @@ Pulling new signals from one source, on that source's own schedule. A fetch stor
 _Avoid_: Run, sync, crawl, scrape
 
 **Tick**:
-The hourly wake-up that starts all scheduled work: it fetches every source that is due, and starts or continues a distill when one is due. It stops before its deadline and leaves the rest for the next tick.
+The hourly wake-up that starts all scheduled work: it fetches every source that is due, and starts or continues a distill when one is due. It stops before its deadline and leaves the rest for the next tick. Only one tick runs at a time: a tick that finds another one running skips.
 _Avoid_: Cron, job, heartbeat
 
 ### Distilling

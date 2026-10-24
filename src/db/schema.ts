@@ -65,12 +65,12 @@ export const tickLease = pgTable(
   (t) => [check("tick_lease_single_row", sql`${t.id} = 1`)],
 );
 
-// A pass covers every signal fetched at or before it started. Its state lives here so a pass
-// cut short by the tick deadline or the budget cap resumes on a later tick.
+// A pass covers every signal fetched at or before it started. Its progress lives in
+// signals.distill_status, so a pass cut short by the tick deadline or the budget cap resumes
+// on a later tick.
 export const distillPasses = pgTable("distill_passes", {
   id: uuid("id").primaryKey().defaultRandom(),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
-  step: text("step").$type<"filter">().notNull(),
   finishedAt: timestamp("finished_at", { withTimezone: true }),
 });
 

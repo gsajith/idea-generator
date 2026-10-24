@@ -1,9 +1,9 @@
-import { and, asc, eq, lte } from "drizzle-orm";
+import { and, asc, eq, inArray, lte } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import type { Db } from "@/db/client";
 import { signals } from "@/db/schema";
-import type { Model } from "@/model/model";
+import { type Model, ModelOutputError } from "@/model/model";
 
 const BATCH_SIZE = 25;
 // The prompt cuts long signals short, so one rant can't blow up a batch's cost.
@@ -33,24 +33,36 @@ export async function filterNextBatch(db: Db, model: Model, passStartedAt: Date)
   const batch = await nextBatch(db, passStartedAt);
   if (!batch.length) return false;
 
-  const { output } = await model.call({
-    role: "filter",
-    system: SYSTEM,
-    messages: [{ role: "user", content: batch.map(signalPrompt).join("\n\n") }],
-    schema: verdictsSchema,
-    maxTokens: 4_000,
-  });
+  // Keep a signal the filter gave no verdict for, and the whole batch when the reply is
+  // unusable, instead of retrying. A bad reply then can't loop, re-bill every tick or lose a need.
+  let verdicts: z.infer<typeof verdictsSchema>["verdicts"] = [];
+  try {
+    const { output } = await model.call({
+      role: "filter",
+      system: SYSTEM,
+      messages: [{ role: "user", content: batch.map(signalPrompt).join("\n\n") }],
+      schema: verdictsSchema,
+      maxTokens: 4_000,
+    });
+    verdicts = output.verdicts;
+  } catch (error) {
+    if (!(error instanceof ModelOutputError)) throw error;
+  }
 
-  // Keep a signal the filter gave no verdict for instead of retrying it, so a bad reply can't
-  // loop or lose a need.
-  const verdicts = new Map(output.verdicts.map((v) => [v.id, v]));
+  const drops = new Map(verdicts.filter((v) => !v.keep).map((v) => [v.id, v.reason]));
+  const kept = batch.filter((s) => !drops.has(s.externalId));
+  const dropped = batch.filter((s) => drops.has(s.externalId));
   await db.transaction(async (tx) => {
-    for (const signal of batch) {
-      const verdict = verdicts.get(signal.externalId);
-      const dropped = verdict !== undefined && !verdict.keep;
+    if (kept.length) {
       await tx
         .update(signals)
-        .set(dropped ? { distillStatus: "dropped", dropReason: verdict.reason } : { distillStatus: "kept" })
+        .set({ distillStatus: "kept" })
+        .where(inArray(signals.id, kept.map((s) => s.id)));
+    }
+    for (const signal of dropped) {
+      await tx
+        .update(signals)
+        .set({ distillStatus: "dropped", dropReason: drops.get(signal.externalId) })
         .where(eq(signals.id, signal.id));
     }
   });
@@ -84,9 +96,15 @@ function signalPrompt(signal: BatchSignal): string {
   const parent =
     signal.parentText === null
       ? ""
-      : `\n<replying_to>${signal.parentText.slice(0, MAX_PARENT_CHARS)}</replying_to>`;
-  return `<signal id="${signal.externalId}">
-<thread>${signal.threadTitle}</thread>${parent}
-<text>${signal.text.slice(0, MAX_TEXT_CHARS)}</text>
+      : `\n<replying_to>${escape(signal.parentText.slice(0, MAX_PARENT_CHARS))}</replying_to>`;
+  return `<signal id="${escape(signal.externalId)}">
+<thread>${escape(signal.threadTitle)}</thread>${parent}
+<text>${escape(signal.text.slice(0, MAX_TEXT_CHARS))}</text>
 </signal>`;
+}
+
+// Signals are untrusted text, so escape them: a signal can't close its tags and forge another
+// signal or a verdict.
+function escape(text: string): string {
+  return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }

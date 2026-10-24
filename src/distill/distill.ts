@@ -60,6 +60,6 @@ async function startPassIfDue(db: Db, settings: Settings, now: Date) {
   const intervalMs = settings.distillIntervalHours * 3_600_000;
   if (last && last.startedAt.getTime() + intervalMs > now.getTime()) return undefined;
 
-  const [pass] = await db.insert(distillPasses).values({ startedAt: now, step: "filter" }).returning();
+  const [pass] = await db.insert(distillPasses).values({ startedAt: now }).returning();
   return pass;
 }

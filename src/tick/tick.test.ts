@@ -136,11 +136,11 @@ describe("tick", () => {
     const sources = [a.source, b.source];
 
     const first = await run({ db, sources, now, deadline: Date.now() + 10 });
-    expect(first).toMatchObject({ fetched: ["a"], stoppedEarly: true });
+    expect(first).toEqual({ skipped: false, fetched: ["a"], distill: null, stoppedEarly: true });
     expect(b.fetchCount()).toBe(0);
 
     const second = await run({ db, sources, now, deadline: noDeadline });
-    expect(second).toMatchObject({ fetched: ["b"], stoppedEarly: false });
+    expect(second).toEqual({ skipped: false, fetched: ["b"], distill: { status: "finished" }, stoppedEarly: false });
   });
 });
 
@@ -173,15 +173,16 @@ describe("tick lease", () => {
     expect(other.fetchCount()).toBe(0);
 
     gated.open();
-    expect(await first).toMatchObject({
+    expect(await first).toEqual({
       skipped: false,
       fetched: ["slow", "other"],
+      distill: { status: "finished" },
       stoppedEarly: false,
     });
 
     // Same time as the first tick, so only the release lets this one run, not expiry.
     const third = await run({ db, sources, now, deadline: noDeadline });
-    expect(third).toMatchObject({ skipped: false, fetched: [], stoppedEarly: false });
+    expect(third).toEqual({ skipped: false, fetched: [], distill: { status: "not-due" }, stoppedEarly: false });
   });
 
   it("releases the lease when a tick throws", async () => {
@@ -196,7 +197,7 @@ describe("tick lease", () => {
 
     const other = testSource("other", []);
     const next = await run({ db, sources: [other.source], now, deadline: noDeadline });
-    expect(next).toMatchObject({ skipped: false, fetched: ["other"], stoppedEarly: false });
+    expect(next).toEqual({ skipped: false, fetched: ["other"], distill: { status: "finished" }, stoppedEarly: false });
   });
 
   it("lets a tick take over a lease left by a hung tick once the lease expires", async () => {
@@ -213,7 +214,12 @@ describe("tick lease", () => {
     expect(atExpiry).toEqual({ skipped: true });
 
     const afterExpiry = await run({ db, sources, now: at(leaseMs + 1), deadline: noDeadline });
-    expect(afterExpiry).toMatchObject({ skipped: false, fetched: ["other"], stoppedEarly: false });
+    expect(afterExpiry).toEqual({
+      skipped: false,
+      fetched: ["other"],
+      distill: { status: "finished" },
+      stoppedEarly: false,
+    });
 
     hung.open();
     await hungTick;
@@ -323,15 +329,37 @@ describe("tick distill", () => {
         return fake.call(request);
       },
     };
+    // Fetch first and start the pass with no budget, so the timed tick below only distills.
+    const noBudget = { ...settings, dailySpendCapUsd: 0 };
+    await run({ db, sources, model: slow, settings: noBudget, now, deadline: noDeadline });
 
-    const first = await run({ db, sources, model: slow, now, deadline: Date.now() + 100 });
-    expect(first).toMatchObject({ distill: { status: "stopped", reason: "deadline" }, stoppedEarly: true });
+    const cut = await run({ db, sources, model: slow, now: hoursLater(1), deadline: Date.now() + 100 });
+    expect(cut).toEqual({
+      skipped: false,
+      fetched: [],
+      distill: { status: "stopped", reason: "deadline" },
+      stoppedEarly: true,
+    });
     expect(fake.calls).toHaveLength(1);
     expect(await pendingCount(db)).toBe(1);
 
-    const second = await run({ db, sources, model: slow, now: hoursLater(1), deadline: noDeadline });
-    expect(second).toMatchObject({ distill: { status: "finished" }, stoppedEarly: false });
+    const resumed = await run({ db, sources, model: slow, now: hoursLater(2), deadline: noDeadline });
+    expect(resumed).toEqual({ skipped: false, fetched: [], distill: { status: "finished" }, stoppedEarly: false });
     expect(fake.calls).toHaveLength(2);
     expect(await pendingCount(db)).toBe(0);
+  });
+
+  it("keeps a batch whose filter reply can't be used, and still counts its cost", async () => {
+    const db = await createTestDb();
+    const { source } = testSource("rent", [thread]);
+    // Fails the filter's schema, like a refused or cut-off reply the API still bills for.
+    const model = createFakeModel([{ role: "filter", reply: { verdicts: "not a list" } }]);
+
+    const result = await run({ db, sources: [source], model, now, deadline: noDeadline });
+
+    expect(result).toMatchObject({ distill: { status: "finished" } });
+    const rows = await db.select().from(signals);
+    expect(rows.map((r) => r.distillStatus)).toEqual(["kept", "kept", "kept", "kept"]);
+    expect(await getDistillStatus(db, settings, now)).toMatchObject({ spentTodayUsd: 0.01 });
   });
 });

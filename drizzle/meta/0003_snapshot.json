@@ -1,5 +1,5 @@
 {
-  "id": "dbf261d4-5424-40a4-853a-8b2eaf0f2d5b",
+  "id": "d49d987d-e887-43d8-bc55-5c0cac32bb80",
   "prevId": "0055d130-1ff1-4cd9-9f38-3bf7a22bdebb",
   "version": "7",
   "dialect": "postgresql",
@@ -56,12 +56,6 @@
         "started_at": {
           "name": "started_at",
           "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "step": {
-          "name": "step",
-          "type": "text",
           "primaryKey": false,
           "notNull": true
         },

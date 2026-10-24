@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { modelSpend } from "@/db/schema";
-import type { Model } from "./model";
+import { type Model, ModelOutputError } from "./model";
 
 /** Thrown instead of making a model call once the day's spend has reached the cap. */
 export class BudgetReachedError extends Error {
@@ -18,17 +18,27 @@ export async function spentOn(db: Db, day: string): Promise<number> {
   return row?.usd ?? 0;
 }
 
-/** Wraps a model so each call adds its cost to the spend record for the UTC day of `now`. */
+/**
+ * Wraps a model so each call adds its cost to the spend record for the UTC day of `now`,
+ * including calls whose reply was billed but unusable.
+ */
 export function recordingSpend(model: Model, db: Db, now: Date): Model {
   const day = utcDay(now);
+  const record = (usd: number) =>
+    db
+      .insert(modelSpend)
+      .values({ day, usd })
+      .onConflictDoUpdate({ target: modelSpend.day, set: { usd: sql`${modelSpend.usd} + excluded.usd` } });
   return {
     async call(request) {
-      const result = await model.call(request);
-      await db
-        .insert(modelSpend)
-        .values({ day, usd: result.usage.costUsd })
-        .onConflictDoUpdate({ target: modelSpend.day, set: { usd: sql`${modelSpend.usd} + excluded.usd` } });
-      return result;
+      try {
+        const result = await model.call(request);
+        await record(result.usage.costUsd);
+        return result;
+      } catch (error) {
+        if (error instanceof ModelOutputError) await record(error.usage.costUsd);
+        throw error;
+      }
     },
   };
 }

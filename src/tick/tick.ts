@@ -5,12 +5,6 @@ import { sourceState, tickLease } from "@/db/schema";
 import { fetchSource } from "@/sources/fetch";
 import type { Source } from "@/sources/source";
 
-/**
- * How long a tick holds the lease. It matches the function time limit (maxDuration in
- * src/app/api/tick/route.ts), so a lease left by a tick that crashed or was killed frees itself.
- */
-export const TICK_LEASE_MS = 300_000;
-
 export type TickOptions = {
   db: Db;
   sources: Source[];
@@ -18,6 +12,11 @@ export type TickOptions = {
   now: Date;
   /** Wall-clock time (epoch ms) to stop starting new work by. */
   deadline: number;
+  /**
+   * How long the lease lasts. Set it to the function time limit, so a lease left by a tick that
+   * crashed or was killed frees itself.
+   */
+  leaseMs: number;
 };
 
 export type TickResult =
@@ -37,9 +36,9 @@ export type TickResult =
  * one fetch in progress can run past it.
  */
 export async function tick(options: TickOptions): Promise<TickResult> {
-  const { db, now } = options;
+  const { db, now, leaseMs } = options;
   const holder = randomUUID();
-  const lockedUntil = new Date(now.getTime() + TICK_LEASE_MS);
+  const lockedUntil = new Date(now.getTime() + leaseMs);
   // One statement claims the lease: it inserts the row, or takes it over once it has expired.
   const claimed = await db
     .insert(tickLease)
@@ -49,7 +48,7 @@ export async function tick(options: TickOptions): Promise<TickResult> {
       set: { holder, lockedUntil },
       setWhere: lt(tickLease.lockedUntil, now),
     })
-    .returning();
+    .returning({ holder: tickLease.holder });
   if (!claimed.length) return { skipped: true };
 
   try {

@@ -3,11 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 import { signals } from "@/db/schema";
 import { createTestDb } from "@/db/test-db";
 import type { FetchedSignal, FetchedThread, Source } from "@/sources/source";
-import { TICK_LEASE_MS, tick } from "./tick";
+import { type TickOptions, tick as runTick } from "./tick";
 
 const now = new Date("2026-10-01T12:00:00Z");
 const hoursLater = (h: number) => new Date(now.getTime() + h * 3_600_000);
 const noDeadline = Number.POSITIVE_INFINITY;
+const leaseMs = 300_000;
+const tick = (options: Omit<TickOptions, "leaseMs">) => runTick({ ...options, leaseMs });
 
 function signal(externalId: string, author: string, replies: FetchedSignal[] = []): FetchedSignal {
   return {
@@ -129,23 +131,18 @@ describe("tick", () => {
 });
 
 describe("tick lease", () => {
-  // A source whose fetch waits until the test opens the gate, so a tick can be held mid-run.
+  // An hourly source whose fetch waits for the test to open the gate, holding a tick mid-run.
   function gatedSource(id: string) {
     let open!: () => void;
     const gate = new Promise<void>((resolve) => (open = resolve));
-    let fetches = 0;
-    const source: Source = {
-      id,
-      name: id,
-      kind: "fixture",
-      fetchIntervalHours: 1,
-      fetch: async () => {
-        fetches++;
-        await gate;
-        return [thread];
-      },
+    const gated = testSource(id, [thread], 1);
+    const fetch = gated.source.fetch;
+    gated.source.fetch = async (now) => {
+      const threads = await fetch(now);
+      await gate;
+      return threads;
     };
-    return { source, open, fetchCount: () => fetches };
+    return { ...gated, open };
   }
 
   it("skips a tick while another holds the lease, and runs one after release", async () => {
@@ -190,23 +187,21 @@ describe("tick lease", () => {
 
   it("lets a tick take over a lease left by a hung tick once the lease expires", async () => {
     const db = await createTestDb();
-    const hung = gatedSource("hung"); // The gate never opens.
-    void tick({ db, sources: [hung.source], now, deadline: noDeadline });
+    const hung = gatedSource("hung"); // The gate stays shut until the end of the test.
+    const hungTick = tick({ db, sources: [hung.source], now, deadline: noDeadline });
     await vi.waitFor(() => expect(hung.fetchCount()).toBe(1));
 
     const other = testSource("other", []);
     const sources = [other.source];
     const at = (ms: number) => new Date(now.getTime() + ms);
 
-    const atExpiry = await tick({ db, sources, now: at(TICK_LEASE_MS), deadline: noDeadline });
+    const atExpiry = await tick({ db, sources, now: at(leaseMs), deadline: noDeadline });
     expect(atExpiry).toEqual({ skipped: true });
 
-    const afterExpiry = await tick({
-      db,
-      sources,
-      now: at(TICK_LEASE_MS + 1),
-      deadline: noDeadline,
-    });
+    const afterExpiry = await tick({ db, sources, now: at(leaseMs + 1), deadline: noDeadline });
     expect(afterExpiry).toEqual({ skipped: false, fetched: ["other"], stoppedEarly: false });
+
+    hung.open();
+    await hungTick;
   });
 });

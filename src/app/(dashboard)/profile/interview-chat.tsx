@@ -4,27 +4,36 @@ import { useState, useTransition } from "react";
 import type { InterviewMessage } from "@/profile/interview";
 import { interviewTurnAction } from "./actions";
 
-/** The profile interview. It holds the conversation and hands the final draft to `onDraft`. */
-export function InterviewChat({ hasProfile, onDraft }: { hasProfile: boolean; onDraft: (draft: string) => void }) {
+/**
+ * The profile interview. It holds the conversation, builds on `profileText` (the editor's
+ * current text), and hands the final draft to `onDraft`.
+ */
+export function InterviewChat({ profileText, onDraft }: { profileText: string; onDraft: (draft: string) => void }) {
   const [messages, setMessages] = useState<InterviewMessage[]>([]);
   const [answer, setAnswer] = useState("");
   const [error, setError] = useState(false);
   const [pending, startTurn] = useTransition();
 
+  function reset() {
+    setMessages([]);
+    setAnswer("");
+    setError(false);
+  }
+
   // Sends the conversation so far and appends the next question, or ends with the draft.
-  // A failed turn changes nothing, so the typed answer stays in the box to send again.
+  // A failed turn changes nothing, so the answer stays in the box to send again.
   function takeTurn(conversation: InterviewMessage[]) {
     setError(false);
     startTurn(async () => {
       try {
-        const turn = await interviewTurnAction(conversation);
+        const turn = await interviewTurnAction(conversation, profileText);
         if (turn.kind === "draft") {
-          setMessages([]);
+          reset();
           onDraft(turn.text);
         } else {
           setMessages([...conversation, { from: "interviewer", text: turn.text }]);
+          setAnswer("");
         }
-        setAnswer("");
       } catch {
         setError(true);
       }
@@ -37,21 +46,23 @@ export function InterviewChat({ hasProfile, onDraft }: { hasProfile: boolean; on
     takeTurn([...messages, { from: "builder", text: answer.trim() }]);
   }
 
-  if (messages.length === 0 && !pending) {
+  const started = messages.length > 0 || pending;
+  const asked = messages.filter((m) => m.from === "interviewer").length;
+  const errorLine = error && <p className="text-sm text-red-400">The interviewer didn&apos;t answer. Try again.</p>;
+
+  if (!started) {
     return (
       <div className="flex items-center gap-3">
         <button
           onClick={() => takeTurn([])}
           className="rounded-md border border-neutral-700 px-3 py-2 text-sm hover:bg-neutral-900"
         >
-          {hasProfile ? "Update with the interview" : "Write it with the interview"}
+          {profileText.trim() ? "Update with the interview" : "Write it with the interview"}
         </button>
-        {error && <p className="text-sm text-red-400">The interviewer didn&apos;t answer. Try again.</p>}
+        {errorLine}
       </div>
     );
   }
-
-  const asked = messages.filter((m) => m.from === "interviewer").length;
 
   return (
     <section className="flex flex-col gap-4 rounded-md border border-neutral-800 p-4">
@@ -60,11 +71,7 @@ export function InterviewChat({ hasProfile, onDraft }: { hasProfile: boolean; on
           Interview{asked > 0 && <span className="font-normal text-neutral-500"> · question {asked}</span>}
         </h2>
         <button
-          onClick={() => {
-            setMessages([]);
-            setAnswer("");
-            setError(false);
-          }}
+          onClick={reset}
           disabled={pending}
           className="text-sm text-neutral-400 hover:text-neutral-100 disabled:opacity-40"
         >
@@ -88,7 +95,7 @@ export function InterviewChat({ hasProfile, onDraft }: { hasProfile: boolean; on
         {pending && <li className="text-sm text-neutral-500">Thinking...</li>}
       </ol>
 
-      {error && <p className="text-sm text-red-400">The interviewer didn&apos;t answer. Send again.</p>}
+      {errorLine}
 
       <form onSubmit={submit} className="flex gap-2">
         <textarea
@@ -101,10 +108,13 @@ export function InterviewChat({ hasProfile, onDraft }: { hasProfile: boolean; on
               e.currentTarget.form?.requestSubmit();
             }
           }}
+          // Locked while a turn is pending, so an edit can't be lost when the reply clears the box.
+          disabled={pending}
+          maxLength={5_000}
           rows={2}
           autoFocus
           placeholder="Your answer"
-          className="flex-1 rounded-md border border-neutral-800 bg-neutral-950 p-2 text-sm focus:border-neutral-600 focus:outline-none"
+          className="flex-1 rounded-md border border-neutral-800 bg-neutral-950 p-2 text-sm focus:border-neutral-600 focus:outline-none disabled:opacity-60"
         />
         <button
           disabled={!answer.trim() || pending}

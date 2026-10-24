@@ -1,11 +1,22 @@
 import { z } from "zod";
 import type { Model } from "@/model/model";
 
+export const interviewMessageSchema = z.object({
+  from: z.enum(["interviewer", "builder"]),
+  text: z.string().max(5_000),
+});
+
 /** One line of the profile interview: a question from the interviewer or an answer from the builder. */
-export type InterviewMessage = { from: "interviewer" | "builder"; text: string };
+export type InterviewMessage = z.infer<typeof interviewMessageSchema>;
 
 /** What the interviewer says next: another question, or the draft profile that ends the interview. */
 export type InterviewTurn = { kind: "question" | "draft"; text: string };
+
+export type InterviewInput = {
+  conversation: InterviewMessage[];
+  /** The profile to build on, or null to write one from scratch. */
+  existingProfile: string | null;
+};
 
 const MIN_QUESTIONS = 6;
 const MAX_QUESTIONS = 10;
@@ -30,35 +41,32 @@ Reply with kind "question" and the question, or kind "draft" and the full profil
 
 /**
  * One turn of the profile interview. Stateless: the caller holds the conversation and
- * passes it back each turn, along with the saved profile if there is one.
+ * passes it back each turn, along with the profile to build on if there is one.
  */
-export async function interviewTurn(
-  model: Model,
-  input: { conversation: InterviewMessage[]; existingProfile: string | null },
-): Promise<InterviewTurn> {
-  const answers = input.conversation.filter((m) => m.from === "builder").length;
+export async function interviewTurn(model: Model, input: InterviewInput): Promise<InterviewTurn> {
+  const answerCount = input.conversation.filter((m) => m.from === "builder").length;
   const { output } = await model.call({
     role: "reasoning",
     system: SYSTEM,
-    messages: [{ role: "user", content: prompt(input.conversation, input.existingProfile, answers) }],
-    schema: turnSchema(answers),
+    messages: [{ role: "user", content: interviewPrompt(input, answerCount) }],
+    schema: turnSchema(answerCount),
   });
   return output;
 }
 
 // The schema holds the interview to its question range: no draft before the minimum,
 // and nothing but a draft once the maximum is reached.
-function turnSchema(answers: number) {
+function turnSchema(answerCount: number) {
   const kinds =
-    answers < MIN_QUESTIONS
+    answerCount < MIN_QUESTIONS
       ? (["question"] as const)
-      : answers >= MAX_QUESTIONS
+      : answerCount >= MAX_QUESTIONS
         ? (["draft"] as const)
         : (["question", "draft"] as const);
-  return z.object({ kind: z.enum(kinds), text: z.string() });
+  return z.object({ kind: z.enum(kinds), text: z.string().min(1) });
 }
 
-function prompt(conversation: InterviewMessage[], existingProfile: string | null, answers: number): string {
+function interviewPrompt({ conversation, existingProfile }: InterviewInput, answerCount: number): string {
   const profile = existingProfile
     ? `The builder's current profile:\n<profile>\n${existingProfile}\n</profile>`
     : "The builder has no profile yet.";
@@ -67,5 +75,5 @@ function prompt(conversation: InterviewMessage[], existingProfile: string | null
         .map((m) => `${m.from === "interviewer" ? "Interviewer" : "Builder"}: ${m.text}`)
         .join("\n\n")
     : "(The interview hasn't started. Ask the first question.)";
-  return `${profile}\n\nThe interview so far (${answers} answered):\n<transcript>\n${transcript}\n</transcript>`;
+  return `${profile}\n\nThe interview so far (${answerCount} answered):\n<transcript>\n${transcript}\n</transcript>`;
 }

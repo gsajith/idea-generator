@@ -6,15 +6,14 @@ import { auth } from "@/auth";
 import { getDb } from "@/db/client";
 import { isAllowedEmail } from "@/lib/allowlist";
 import { createAnthropicModel } from "@/model/anthropic";
-import { interviewTurn, type InterviewTurn } from "@/profile/interview";
-import { getProfile, saveProfile } from "@/profile/store";
+import { interviewMessageSchema, interviewTurn, type InterviewTurn } from "@/profile/interview";
+import { PROFILE_MAX_LENGTH } from "@/profile/limits";
+import { saveProfile } from "@/profile/store";
 
 // Saved exactly as typed, so the editor's text matches the saved text afterwards.
-const profileText = z.string().regex(/\S/, "Profile is blank").max(20_000);
+const profileTextSchema = z.string().regex(/\S/, "Profile is blank").max(PROFILE_MAX_LENGTH);
 
-const conversation = z
-  .array(z.object({ from: z.enum(["interviewer", "builder"]), text: z.string().max(5_000) }))
-  .max(40);
+const conversationSchema = z.array(interviewMessageSchema).max(40);
 
 // Server actions take direct POSTs, so each one checks the session itself.
 async function requireBuilder() {
@@ -24,16 +23,19 @@ async function requireBuilder() {
 
 export async function saveProfileAction(text: string): Promise<void> {
   await requireBuilder();
-  await saveProfile(getDb(), profileText.parse(text));
+  await saveProfile(getDb(), profileTextSchema.parse(text));
   revalidatePath("/profile");
 }
 
-/** Runs one interview turn against the saved profile, so a re-run updates it. */
-export async function interviewTurnAction(messages: unknown): Promise<InterviewTurn> {
+/**
+ * Runs one interview turn. It builds on the profile text in the editor, saved or not,
+ * so a re-run updates the profile and keeps unsaved edits.
+ */
+export async function interviewTurnAction(messages: unknown, profileText: unknown): Promise<InterviewTurn> {
   await requireBuilder();
-  const existing = await getProfile(getDb());
+  const existing = z.string().max(PROFILE_MAX_LENGTH).parse(profileText);
   return interviewTurn(createAnthropicModel(), {
-    conversation: conversation.parse(messages),
-    existingProfile: existing?.text ?? null,
+    conversation: conversationSchema.parse(messages),
+    existingProfile: existing.trim() ? existing : null,
   });
 }

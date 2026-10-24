@@ -35,6 +35,28 @@ describe("interviewTurn", () => {
     expect(turn).toEqual({ kind: "draft", text: draft });
   });
 
+  it("can't end with a draft before the sixth answer", async () => {
+    const model = createFakeModel([{ reply: { kind: "draft", text: "Too early." } }]);
+
+    const turn = interviewTurn(model, {
+      conversation: answered(["Next.js", "Small tools", "Weekends", "Fun", "Nothing crypto"]),
+      existingProfile: null,
+    });
+
+    await expect(turn).rejects.toThrow();
+  });
+
+  it("can only end with a draft after the tenth answer", async () => {
+    const model = createFakeModel([{ reply: { kind: "question", text: "An eleventh question?" } }]);
+
+    const turn = interviewTurn(model, {
+      conversation: answered(Array.from({ length: 10 }, (_, i) => `Answer ${i + 1}`)),
+      existingProfile: null,
+    });
+
+    await expect(turn).rejects.toThrow();
+  });
+
   it("builds the draft on the existing profile", async () => {
     const existing = "You build Chrome extensions in plain TypeScript.";
     const updated = `${existing} Lately you also build small Next.js apps.`;

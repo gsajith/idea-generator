@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { PROFILE_MAX_LENGTH } from "@/profile/limits";
 import { saveProfileAction } from "./actions";
 import { InterviewChat } from "./interview-chat";
 
 /**
- * The profile text with a save button. A finished interview drops its draft into the
- * same textarea, so the builder edits the draft before saving it like any other change.
+ * The profile text with a save button. The interview builds on the text here, saved or
+ * not, and drops its draft into the same textarea for editing before save.
  */
 export function ProfileEditor({ savedText, updatedAt }: { savedText: string; updatedAt: Date | null }) {
   const [text, setText] = useState(savedText);
@@ -31,7 +32,7 @@ export function ProfileEditor({ savedText, updatedAt }: { savedText: string; upd
   return (
     <div className="mt-6 flex flex-col gap-6">
       <InterviewChat
-        hasProfile={savedText !== ""}
+        profileText={text}
         onDraft={(draft) => {
           setText(draft);
           setFromDraft(true);
@@ -45,6 +46,7 @@ export function ProfileEditor({ savedText, updatedAt }: { savedText: string; upd
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
+          maxLength={PROFILE_MAX_LENGTH}
           rows={14}
           placeholder="Your skills, the stacks you're fast in, what you like building, project sizes, revenue or fun, off-limits areas, past projects."
           className="w-full rounded-md border border-neutral-800 bg-neutral-950 p-3 text-sm leading-relaxed focus:border-neutral-600 focus:outline-none"

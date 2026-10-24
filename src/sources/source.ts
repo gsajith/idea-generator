@@ -1,4 +1,4 @@
-/** One post or comment as a source returns it, before it's stored as a signal. */
+/** One post or comment as a source returns it. `fetchSource` stores it as a signal. */
 export type FetchedSignal = {
   /** Unique within the source, so a re-fetch can skip signals already stored. */
   externalId: string;
@@ -22,6 +22,6 @@ export type Source = {
   name: string;
   kind: "fixture";
   fetchIntervalHours: number;
-  /** Returns the source's current threads. Signals the database already has are skipped. */
+  /** Returns the source's current threads. `fetchSource` skips signals it already stored. */
   fetch(now: Date): Promise<FetchedThread[]>;
 };

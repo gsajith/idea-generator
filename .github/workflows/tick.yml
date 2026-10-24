@@ -1,7 +1,7 @@
 name: Tick
 
-# Drives all scheduled work (fetching sources, and later distilling) by calling the tick endpoint
-# hourly. This lives in GitHub Actions because Vercel Hobby crons can only run once a day.
+# Calls the tick endpoint hourly, which fetches due sources and will later run distills too.
+# This lives in GitHub Actions because Vercel Hobby crons can only run once a day.
 # Needs two repository secrets: APP_URL (e.g. https://example.vercel.app) and TICK_SECRET, which
 # must match the TICK_SECRET environment variable on Vercel.
 on:

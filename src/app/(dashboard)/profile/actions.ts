@@ -6,6 +6,7 @@ import { auth } from "@/auth";
 import { getDb } from "@/db/client";
 import { isAllowedEmail } from "@/lib/allowlist";
 import { createAnthropicModel } from "@/model/anthropic";
+import { recordingSpend } from "@/model/spend";
 import { interviewMessageSchema, interviewTurn, type InterviewTurn } from "@/profile/interview";
 import { PROFILE_MAX_LENGTH } from "@/profile/limits";
 import { saveProfile } from "@/profile/store";
@@ -34,7 +35,9 @@ export async function saveProfileAction(text: string): Promise<void> {
 export async function interviewTurnAction(messages: unknown, profileText: unknown): Promise<InterviewTurn> {
   await requireBuilder();
   const existing = z.string().max(PROFILE_MAX_LENGTH).parse(profileText);
-  return interviewTurn(createAnthropicModel(), {
+  // The interview counts toward the day's spend, but the cap only stops distills.
+  const model = recordingSpend(createAnthropicModel(), getDb(), new Date());
+  return interviewTurn(model, {
     conversation: conversationSchema.parse(messages),
     existingProfile: existing.trim() ? existing : null,
   });

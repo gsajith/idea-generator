@@ -1,8 +1,9 @@
-import { desc, isNotNull, isNull } from "drizzle-orm";
+import { desc, isNotNull } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { distillPasses } from "@/db/schema";
 import type { Settings } from "@/settings";
-import { spentOn, utcDay } from "./budget";
+import { spentOn, utcDay } from "@/model/spend";
+import { unfinishedPass } from "./distill";
 
 export type DistillStatus = {
   lastFinishedAt: Date | null;
@@ -12,21 +13,21 @@ export type DistillStatus = {
   capUsd: number;
 };
 
-/** Whether the pipeline is alive, for the dashboard's status area. */
+/** Whether distills are running and what they cost today, for the dashboard's status area. */
 export async function getDistillStatus(db: Db, settings: Settings, now: Date): Promise<DistillStatus> {
-  const [[finished], [inProgress], spentTodayUsd] = await Promise.all([
+  const [[finished], inProgress, spentTodayUsd] = await Promise.all([
     db
       .select({ at: distillPasses.finishedAt })
       .from(distillPasses)
       .where(isNotNull(distillPasses.finishedAt))
       .orderBy(desc(distillPasses.finishedAt))
       .limit(1),
-    db.select({ at: distillPasses.startedAt }).from(distillPasses).where(isNull(distillPasses.finishedAt)),
+    unfinishedPass(db),
     spentOn(db, utcDay(now)),
   ]);
   return {
     lastFinishedAt: finished?.at ?? null,
-    inProgressSince: inProgress?.at ?? null,
+    inProgressSince: inProgress?.startedAt ?? null,
     spentTodayUsd,
     capUsd: settings.dailySpendCapUsd,
   };

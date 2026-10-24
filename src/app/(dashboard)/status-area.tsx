@@ -3,8 +3,8 @@ import { getDistillStatus } from "@/distill/status";
 import { formatTime, formatUsd } from "@/lib/format";
 import { getSettings } from "@/settings";
 
-/** Shows that the pipeline is alive: the last distill, any pass in progress, and today's spend. */
-export async function DistillStatus() {
+/** Shows that distills are running: the last distill, any pass in progress, and today's spend. */
+export async function StatusArea() {
   const status = await getDistillStatus(getDb(), getSettings(), new Date());
   const capReached = status.spentTodayUsd >= status.capUsd;
 

@@ -2,7 +2,7 @@
 export type Settings = {
   /** Hours between the starts of distill passes. DISTILL_INTERVAL_HOURS, default 24. */
   distillIntervalHours: number;
-  /** Most the distill may spend on model calls per UTC day. DAILY_SPEND_CAP_USD, default 1. */
+  /** The most the distill may spend on model calls per UTC day. DAILY_SPEND_CAP_USD, default 1. */
   dailySpendCapUsd: number;
 };
 

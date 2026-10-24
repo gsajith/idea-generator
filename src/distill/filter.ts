@@ -6,7 +6,7 @@ import { signals } from "@/db/schema";
 import type { Model } from "@/model/model";
 
 const BATCH_SIZE = 25;
-// Long signals are cut so one rant can't blow up a batch's cost.
+// The prompt cuts long signals short, so one rant can't blow up a batch's cost.
 const MAX_TEXT_CHARS = 2_000;
 const MAX_PARENT_CHARS = 500;
 
@@ -41,7 +41,8 @@ export async function filterNextBatch(db: Db, model: Model, passStartedAt: Date)
     maxTokens: 4_000,
   });
 
-  // A signal the filter skipped is kept rather than retried, so a bad reply can't loop or lose a need.
+  // Keep a signal the filter gave no verdict for instead of retrying it, so a bad reply can't
+  // loop or lose a need.
   const verdicts = new Map(output.verdicts.map((v) => [v.id, v]));
   await db.transaction(async (tx) => {
     for (const signal of batch) {

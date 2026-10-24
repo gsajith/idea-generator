@@ -2,8 +2,8 @@ import { desc, eq, isNull } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { distillPasses } from "@/db/schema";
 import type { Model } from "@/model/model";
+import { BudgetReachedError, withSpendCap } from "@/model/spend";
 import type { Settings } from "@/settings";
-import { BudgetReachedError, withBudget } from "./budget";
 import { filterNextBatch } from "./filter";
 
 export type DistillOptions = {
@@ -29,11 +29,11 @@ export async function distill({ db, model, settings, now, deadline }: DistillOpt
   const pass = (await unfinishedPass(db)) ?? (await startPassIfDue(db, settings, now));
   if (!pass) return { status: "not-due" };
 
-  const budgeted = withBudget(model, db, { now, capUsd: settings.dailySpendCapUsd });
+  const capped = withSpendCap(model, db, { now, capUsd: settings.dailySpendCapUsd });
   try {
     for (;;) {
       if (Date.now() >= deadline) return { status: "stopped", reason: "deadline" };
-      if (!(await filterNextBatch(db, budgeted, pass.startedAt))) break;
+      if (!(await filterNextBatch(db, capped, pass.startedAt))) break;
     }
   } catch (error) {
     if (error instanceof BudgetReachedError) return { status: "stopped", reason: "budget" };
@@ -44,7 +44,8 @@ export async function distill({ db, model, settings, now, deadline }: DistillOpt
   return { status: "finished" };
 }
 
-async function unfinishedPass(db: Db) {
+/** The pass in progress, if any. At most one pass is unfinished at a time. */
+export async function unfinishedPass(db: Db) {
   const [pass] = await db.select().from(distillPasses).where(isNull(distillPasses.finishedAt));
   return pass;
 }

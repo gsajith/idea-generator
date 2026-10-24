@@ -12,7 +12,7 @@ A personal site that listens to places where consumers talk, distills what they 
 
 ## Scheduling
 
-`.github/workflows/tick.yml` calls `POST /api/tick` every hour, which fetches every source that is due. Set the `APP_URL` and `TICK_SECRET` repository secrets on GitHub, and the same `TICK_SECRET` on Vercel.
+`.github/workflows/tick.yml` calls `POST /api/tick` every hour. Each tick fetches every source that is due, then starts or continues a distill when one is due. Distill model calls stop for the day once spend reaches `DAILY_SPEND_CAP_USD`. Set the `APP_URL` and `TICK_SECRET` repository secrets on GitHub, and the same `TICK_SECRET` on Vercel.
 
 ## Checks
 

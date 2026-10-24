@@ -22,6 +22,13 @@
       "when": 1792823329461,
       "tag": "0002_tick_lease",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792882867445,
+      "tag": "0003_distill_passes_and_spend",
+      "breakpoints": true
     }
   ]
 }

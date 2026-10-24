@@ -1,5 +1,5 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import type { Model, ModelRequest, ModelResult, ModelRole } from "./model";
+import { type Model, ModelOutputError, type ModelRequest, type ModelResult, type ModelRole } from "./model";
 
 export type FakeReply = {
   /** Only match calls for this role. Omit to match either role. */
@@ -20,8 +20,8 @@ type FakeModel = Model & {
 
 /**
  * A scripted model for tests. Each call uses the first reply whose role and match fit.
- * Replies go through the request's schema, so a reply the real model couldn't send fails
- * the test. A call with no matching reply throws.
+ * Replies go through the request's schema. A reply that fails it throws a ModelOutputError,
+ * as the production model does for unusable output. A call with no matching reply throws.
  */
 export function createFakeModel(replies: FakeReply[]): FakeModel {
   const calls: ModelRequest<unknown>[] = [];
@@ -40,10 +40,12 @@ export function createFakeModel(replies: FakeReply[]): FakeModel {
       if (!found) {
         throw new Error(`No fake reply for a ${request.role} call:\n${text.slice(0, 500)}`);
       }
-      return {
-        output: request.schema.parse(found.reply),
-        usage: { inputTokens: 0, outputTokens: 0, costUsd: COST_PER_CALL_USD },
-      };
+      const usage = { inputTokens: 0, outputTokens: 0, costUsd: COST_PER_CALL_USD };
+      const parsed = request.schema.safeParse(found.reply);
+      if (!parsed.success) {
+        throw new ModelOutputError(`Fake reply doesn't match the schema: ${parsed.error.message}`, usage);
+      }
+      return { output: parsed.data, usage };
     },
   };
 }

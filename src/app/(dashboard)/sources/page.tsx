@@ -1,12 +1,7 @@
 import { getDb } from "@/db/client";
+import { formatTime } from "@/lib/format";
 import { sources } from "@/sources/registry";
 import { getSourceStatuses } from "@/sources/status";
-
-const formatTime = new Intl.DateTimeFormat("en-US", {
-  dateStyle: "medium",
-  timeStyle: "short",
-  timeZone: "UTC",
-}).format;
 
 export default async function SourcesPage() {
   const statuses = await getSourceStatuses(getDb(), sources);
@@ -33,7 +28,7 @@ export default async function SourcesPage() {
                 Every {source.fetchIntervalHours === 1 ? "hour" : `${source.fetchIntervalHours} hours`}
               </td>
               <td className="py-2 pr-4 text-neutral-400">
-                {lastFetchedAt ? `${formatTime(lastFetchedAt)} UTC` : "Never"}
+                {lastFetchedAt ? formatTime(lastFetchedAt) : "Never"}
               </td>
               <td className="py-2 text-right tabular-nums">{signalCount}</td>
             </tr>

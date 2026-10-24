@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
-import type { Model, ModelRequest, ModelResult, ModelRole } from "./model";
+import { type Model, ModelOutputError, type ModelRequest, type ModelResult, type ModelRole } from "./model";
 
 type Price = { input: number; output: number };
 
@@ -28,10 +28,11 @@ const MAX_TOKENS = 16000;
  * The production model. Model IDs come from FILTER_MODEL and REASONING_MODEL. A model
  * missing from PRICES needs FILTER_MODEL_PRICE or REASONING_MODEL_PRICE set as
  * "<input>,<output>" USD per million tokens. The SDK reads ANTHROPIC_API_KEY and
- * ANTHROPIC_BASE_URL itself, so a compatible endpoint only needs those set.
+ * ANTHROPIC_BASE_URL itself, so a compatible endpoint only needs those set. Leave the options
+ * out to use the SDK's own timeout and retries.
  */
-export function createAnthropicModel(): Model {
-  const client = new Anthropic();
+export function createAnthropicModel(options: { timeoutMs?: number; maxRetries?: number } = {}): Model {
+  const client = new Anthropic({ timeout: options.timeoutMs, maxRetries: options.maxRetries });
   const models: Record<ModelRole, { id: string; price: Price }> = {
     filter: resolveModel("filter"),
     reasoning: resolveModel("reasoning"),
@@ -50,25 +51,23 @@ export function createAnthropicModel(): Model {
         output_config: { format: zodOutputFormat(request.schema), ...(effort && { effort }) },
       });
 
+      const { input_tokens, output_tokens } = response.usage;
+      const usage = {
+        inputTokens: input_tokens,
+        outputTokens: output_tokens,
+        costUsd: (input_tokens * price.input + output_tokens * price.output) / 1_000_000,
+      };
       if (response.stop_reason === "refusal") {
-        throw new Error(`${id} refused: ${response.stop_details?.explanation ?? "no reason given"}`);
+        const reason = response.stop_details?.explanation ?? "no reason given";
+        throw new ModelOutputError(`${id} refused: ${reason}`, usage);
       }
       if (response.stop_reason === "max_tokens") {
-        throw new Error(`${id} hit max_tokens (${maxTokens}) before finishing`);
+        throw new ModelOutputError(`${id} hit max_tokens (${maxTokens}) before finishing`, usage);
       }
       if (response.parsed_output === null) {
-        throw new Error(`${id} returned output that doesn't match the schema`);
+        throw new ModelOutputError(`${id} returned output that doesn't match the schema`, usage);
       }
-
-      const { input_tokens, output_tokens } = response.usage;
-      return {
-        output: response.parsed_output,
-        usage: {
-          inputTokens: input_tokens,
-          outputTokens: output_tokens,
-          costUsd: (input_tokens * price.input + output_tokens * price.output) / 1_000_000,
-        },
-      };
+      return { output: response.parsed_output, usage };
     },
   };
 }

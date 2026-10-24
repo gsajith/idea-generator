@@ -1,0 +1,27 @@
+name: Tick
+
+# Calls the tick endpoint hourly, which fetches due sources and will later run distills too.
+# This lives in GitHub Actions because Vercel Hobby crons can only run once a day.
+# Needs two repository secrets: APP_URL (e.g. https://example.vercel.app) and TICK_SECRET, which
+# must match the TICK_SECRET environment variable on Vercel.
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      APP_URL: ${{ secrets.APP_URL }}
+      TICK_SECRET: ${{ secrets.TICK_SECRET }}
+    steps:
+      # Skips quietly until the secrets are set, so an undeployed app doesn't fail every hour.
+      # A job-level `if` can't read secrets or env, so the check sits on the step.
+      - if: env.APP_URL != ''
+        run: |
+          curl --fail-with-body --silent --show-error --max-time 320 \
+            -X POST -H "Authorization: Bearer $TICK_SECRET" "$APP_URL/api/tick"

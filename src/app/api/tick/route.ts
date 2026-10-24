@@ -1,5 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { getDb } from "@/db/client";
+import { createAnthropicModel } from "@/model/anthropic";
+import { getSettings } from "@/settings";
 import { sources } from "@/sources/registry";
 import { tick } from "@/tick/tick";
 
@@ -16,7 +18,9 @@ export async function POST(request: Request) {
   const start = Date.now();
   const result = await tick({
     db: getDb(),
+    model: createAnthropicModel(),
     sources,
+    settings: getSettings(),
     now: new Date(start),
     deadline: start + TICK_TIME_MS,
     leaseMs: maxDuration * 1000,

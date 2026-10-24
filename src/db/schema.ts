@@ -2,6 +2,8 @@ import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
   check,
+  date,
+  doublePrecision,
   integer,
   pgTable,
   text,
@@ -44,6 +46,9 @@ export const signals = pgTable(
     text: text("text").notNull(),
     publishedAt: timestamp("published_at", { withTimezone: true }).notNull(),
     fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull(),
+    // Set by a distill's filter step. Only pending signals are sent to the filter.
+    distillStatus: text("distill_status").$type<"pending" | "kept" | "dropped">().notNull().default("pending"),
+    dropReason: text("drop_reason"),
   },
   (t) => [unique("signals_source_external_id").on(t.sourceId, t.externalId)],
 );
@@ -59,3 +64,18 @@ export const tickLease = pgTable(
   },
   (t) => [check("tick_lease_single_row", sql`${t.id} = 1`)],
 );
+
+// A pass covers every signal fetched at or before it started. Its state lives here so a pass
+// cut short by the tick deadline or the budget cap resumes on a later tick.
+export const distillPasses = pgTable("distill_passes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+  step: text("step").$type<"filter">().notNull(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+});
+
+// Model spend per UTC day, checked against the daily cap before every distill model call.
+export const modelSpend = pgTable("model_spend", {
+  day: date("day", { mode: "string" }).primaryKey(),
+  usd: doublePrecision("usd").notNull(),
+});

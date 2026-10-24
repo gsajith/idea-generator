@@ -2,13 +2,18 @@ import { randomUUID } from "node:crypto";
 import { eq, lt } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { sourceState, tickLease } from "@/db/schema";
+import { distill, type DistillResult } from "@/distill/distill";
+import type { Model } from "@/model/model";
+import type { Settings } from "@/settings";
 import { fetchSource } from "@/sources/fetch";
 import type { Source } from "@/sources/source";
 
 export type TickOptions = {
   db: Db;
+  model: Model;
   sources: Source[];
-  /** Decides which sources are due and when the lease expires. */
+  settings: Settings;
+  /** Decides which sources and distills are due, which day's spend counts and when the lease expires. */
   now: Date;
   /** Wall-clock time (epoch ms) to stop starting new work by. */
   deadline: number;
@@ -26,14 +31,17 @@ export type TickResult =
       skipped: false;
       /** Ids of the sources fetched by this tick. */
       fetched: string[];
+      /** What the distill did, or null when the deadline passed before the tick got to it. */
+      distill: DistillResult | null;
       /** True when the deadline cut the tick short. The next tick picks up what's left. */
       stoppedEarly: boolean;
     };
 
 /**
- * The single entry point for scheduled work: fetches every source that is due. Only one tick runs
- * at a time; a tick that finds the lease taken skips. It checks the deadline between fetches, so
- * one fetch in progress can run past it.
+ * The single entry point for scheduled work: fetches every source that is due, then starts or
+ * continues a distill if one is due. Only one tick runs at a time; a tick that finds the lease
+ * taken skips. It checks the deadline between units of work, so one unit in progress can run
+ * past it.
  */
 export async function tick(options: TickOptions): Promise<TickResult> {
   const { db, now, leaseMs } = options;
@@ -52,14 +60,14 @@ export async function tick(options: TickOptions): Promise<TickResult> {
   if (!claimed.length) return { skipped: true };
 
   try {
-    return { skipped: false, ...(await fetchDueSources(options)) };
+    return { skipped: false, ...(await runScheduledWork(options)) };
   } finally {
     // Scoped to this holder, so a tick that outlived its lease can't free a newer tick's.
     await db.delete(tickLease).where(eq(tickLease.holder, holder));
   }
 }
 
-async function fetchDueSources({ db, sources, now, deadline }: TickOptions) {
+async function runScheduledWork({ db, model, sources, settings, now, deadline }: TickOptions) {
   const state = await db.select().from(sourceState);
   const lastFetched = new Map(state.map((s) => [s.sourceId, s.lastFetchedAt.getTime()]));
   const due = sources.filter((source) => {
@@ -69,9 +77,12 @@ async function fetchDueSources({ db, sources, now, deadline }: TickOptions) {
 
   const fetched: string[] = [];
   for (const source of due) {
-    if (Date.now() >= deadline) return { fetched, stoppedEarly: true };
+    if (Date.now() >= deadline) return { fetched, distill: null, stoppedEarly: true };
     await fetchSource(db, source, now);
     fetched.push(source.id);
   }
-  return { fetched, stoppedEarly: false };
+
+  const distilled = await distill({ db, model, settings, now, deadline });
+  const stoppedEarly = distilled.status === "stopped" && distilled.reason === "deadline";
+  return { fetched, distill: distilled, stoppedEarly };
 }

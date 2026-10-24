@@ -1,13 +1,15 @@
 import { asc } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { signals } from "@/db/schema";
 import { createTestDb } from "@/db/test-db";
 import type { FetchedSignal, FetchedThread, Source } from "@/sources/source";
-import { tick } from "./tick";
+import { type TickOptions, tick as runTick } from "./tick";
 
 const now = new Date("2026-10-01T12:00:00Z");
 const hoursLater = (h: number) => new Date(now.getTime() + h * 3_600_000);
 const noDeadline = Number.POSITIVE_INFINITY;
+const leaseMs = 300_000;
+const tick = (options: Omit<TickOptions, "leaseMs">) => runTick({ ...options, leaseMs });
 
 function signal(externalId: string, author: string, replies: FetchedSignal[] = []): FetchedSignal {
   return {
@@ -120,10 +122,86 @@ describe("tick", () => {
     const sources = [a.source, b.source];
 
     const first = await tick({ db, sources, now, deadline: Date.now() + 10 });
-    expect(first).toEqual({ fetched: ["a"], stoppedEarly: true });
+    expect(first).toEqual({ skipped: false, fetched: ["a"], stoppedEarly: true });
     expect(b.fetchCount()).toBe(0);
 
     const second = await tick({ db, sources, now, deadline: noDeadline });
-    expect(second).toEqual({ fetched: ["b"], stoppedEarly: false });
+    expect(second).toEqual({ skipped: false, fetched: ["b"], stoppedEarly: false });
+  });
+});
+
+describe("tick lease", () => {
+  // An hourly source whose fetch waits for the test to open the gate, holding a tick mid-run.
+  function gatedSource(id: string) {
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => (open = resolve));
+    const gated = testSource(id, [thread], 1);
+    const fetch = gated.source.fetch;
+    gated.source.fetch = async (now) => {
+      const threads = await fetch(now);
+      await gate;
+      return threads;
+    };
+    return { ...gated, open };
+  }
+
+  it("skips a tick while another holds the lease, and runs one after release", async () => {
+    const db = await createTestDb();
+    const gated = gatedSource("slow");
+    const other = testSource("other", []);
+    const sources = [gated.source, other.source];
+
+    const first = tick({ db, sources, now, deadline: noDeadline });
+    await vi.waitFor(() => expect(gated.fetchCount()).toBe(1));
+
+    const second = await tick({ db, sources, now, deadline: noDeadline });
+    expect(second).toEqual({ skipped: true });
+    expect(other.fetchCount()).toBe(0);
+
+    gated.open();
+    expect(await first).toEqual({
+      skipped: false,
+      fetched: ["slow", "other"],
+      stoppedEarly: false,
+    });
+
+    // Same time as the first tick, so only the release lets this one run, not expiry.
+    const third = await tick({ db, sources, now, deadline: noDeadline });
+    expect(third).toEqual({ skipped: false, fetched: [], stoppedEarly: false });
+  });
+
+  it("releases the lease when a tick throws", async () => {
+    const db = await createTestDb();
+    const failing = testSource("failing", []);
+    failing.source.fetch = async () => {
+      throw new Error("source down");
+    };
+
+    const failed = tick({ db, sources: [failing.source], now, deadline: noDeadline });
+    await expect(failed).rejects.toThrow("source down");
+
+    const other = testSource("other", []);
+    const next = await tick({ db, sources: [other.source], now, deadline: noDeadline });
+    expect(next).toEqual({ skipped: false, fetched: ["other"], stoppedEarly: false });
+  });
+
+  it("lets a tick take over a lease left by a hung tick once the lease expires", async () => {
+    const db = await createTestDb();
+    const hung = gatedSource("hung"); // The gate stays shut until the end of the test.
+    const hungTick = tick({ db, sources: [hung.source], now, deadline: noDeadline });
+    await vi.waitFor(() => expect(hung.fetchCount()).toBe(1));
+
+    const other = testSource("other", []);
+    const sources = [other.source];
+    const at = (ms: number) => new Date(now.getTime() + ms);
+
+    const atExpiry = await tick({ db, sources, now: at(leaseMs), deadline: noDeadline });
+    expect(atExpiry).toEqual({ skipped: true });
+
+    const afterExpiry = await tick({ db, sources, now: at(leaseMs + 1), deadline: noDeadline });
+    expect(afterExpiry).toEqual({ skipped: false, fetched: ["other"], stoppedEarly: false });
+
+    hung.open();
+    await hungTick;
   });
 });

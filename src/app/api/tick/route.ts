@@ -19,6 +19,7 @@ export async function POST(request: Request) {
     sources,
     now: new Date(start),
     deadline: start + TICK_TIME_MS,
+    leaseMs: maxDuration * 1000,
   });
   return Response.json(result);
 }

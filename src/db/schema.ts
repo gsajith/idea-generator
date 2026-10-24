@@ -47,3 +47,15 @@ export const signals = pgTable(
   },
   (t) => [unique("signals_source_external_id").on(t.sourceId, t.externalId)],
 );
+
+// At most one tick runs at a time. A tick claims this single row by setting locked_until, and only
+// when the current lease has expired. holder lets a tick release its own lease and nobody else's.
+export const tickLease = pgTable(
+  "tick_lease",
+  {
+    id: integer("id").primaryKey().default(1),
+    holder: uuid("holder").notNull(),
+    lockedUntil: timestamp("locked_until", { withTimezone: true }).notNull(),
+  },
+  (t) => [check("tick_lease_single_row", sql`${t.id} = 1`)],
+);

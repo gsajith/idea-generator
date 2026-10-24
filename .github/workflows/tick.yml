@@ -15,10 +15,13 @@ jobs:
   tick:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      APP_URL: ${{ secrets.APP_URL }}
+      TICK_SECRET: ${{ secrets.TICK_SECRET }}
     steps:
-      - run: |
+      # Skips quietly until the secrets are set, so an undeployed app doesn't fail every hour.
+      # A job-level `if` can't read secrets or env, so the check sits on the step.
+      - if: env.APP_URL != ''
+        run: |
           curl --fail-with-body --silent --show-error --max-time 320 \
             -X POST -H "Authorization: Bearer $TICK_SECRET" "$APP_URL/api/tick"
-        env:
-          APP_URL: ${{ secrets.APP_URL }}
-          TICK_SECRET: ${{ secrets.TICK_SECRET }}
